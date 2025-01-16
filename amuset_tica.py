@@ -1,6 +1,6 @@
 # Author: Siqin Cao <scao66@wisc.edu>
 # Copyright (c) 2024, University of Wisconsin-Madison and the author
-# All rights reserved.
+# MIT license
 
 import numpy
 from scipy.linalg import svd
