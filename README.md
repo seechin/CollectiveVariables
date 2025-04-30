@@ -1,6 +1,7 @@
-# Algorithms to handle collective variable 
+# Algorithms related with collective variables (CVs)
+## Generate CVs and use CVs to analyze dynamics
 
-## 1. AMUSET-TICA
+## 1. AMUSET-TICA: generate CVs
 
 AMUSET-TICA is a collective variable identification method based on tICA and AMUSEt.
 
