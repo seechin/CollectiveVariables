@@ -1,9 +1,11 @@
 # Author: Siqin Cao <scao66@wisc.edu>
-# Copyright (c) 2024, University of Wisconsin-Madison and the author
+# Copyright (c) 2025, University of Wisconsin-Madison and the author
 # MIT license
 
-import numpy
-import scipy.linalg
+#import numpy
+import cupy as numpy
+import scipy
+import cupy
 import sklearn.mixture
 
 class AmusetTICA:
@@ -17,10 +19,6 @@ class AmusetTICA:
         dimensions will be used. Note: when rank overflows max_rank before
         outer product finishes, transform() will be disabled and only return
         an empty list [].
-
-    reversible : bool, default: True
-        True: Koopman matrix is symmetrized to ensure reversibility
-        False: Koopman matrix is not symmetrized
 
     Tutorial
     --------
@@ -39,9 +37,8 @@ class AmusetTICA:
 
     """
 
-    def __init__(this, max_rank: int=0, reversible: bool=True):
+    def __init__(this, max_rank: int=0):
         this.max_rank = max_rank
-        this.reversible = reversible
         this._basis_list = []
         this._tt_u = []
         this._tt_s = []
@@ -86,7 +83,6 @@ class AmusetTICA:
 
         dic = {}
         dic['max_rank']     = this.max_rank
-        dic['reversible']   = this.reversible
         dic['n_basis_list'] = len(this._basis_list)
         for i in range(len(this._basis_list)):
             dic['basis_list_'+str(i)] = this._basis_list[i]
@@ -129,10 +125,6 @@ class AmusetTICA:
             dic = src
 
         this.max_rank       = float(dic['max_rank'])
-        if 'reversible' in dic:
-            this.reversible = bool(dic['reversible'])
-        else:
-            this.reversible = True
         this._basis_list = []
         for i in range(dic['n_basis_list']):
             this._basis_list.append(dic['basis_list_'+str(i)])
@@ -193,7 +185,7 @@ class AmusetTICA:
     
         use_float32 : bool, default: False
             Use numpy.float32 in the outer product
-    
+
         Returns
         -------
         outer : 2D array, [n_features, n_all_frames]
@@ -214,7 +206,8 @@ class AmusetTICA:
           # dimensionality reduction if number of basis overflows max_rank
             if this.max_rank>0:
                 if build_model:
-                    u, s, v = scipy.linalg.svd(outer, full_matrices=False, overwrite_a=True, check_finite=False)
+                    #u, s, v = scipy.linalg.svd(outer, full_matrices=False, overwrite_a=True, check_finite=False)
+                    u, s, v = cupy.linalg.svd(cupy.asarray(outer), full_matrices=False)
                     indices = numpy.argsort(s)[::-1]
                     v = v[indices, :]
                     outer = v
@@ -225,7 +218,7 @@ class AmusetTICA:
                     u = this._tt_u[i_intra_svd_layer]
                     s = this._tt_s[i_intra_svd_layer]
                     indices = this._tt_indices[i_intra_svd_layer]
-                    transform_v = numpy.matmul(numpy.matmul(numpy.diag(1.0/s), numpy.array(u).T), outer)
+                    transform_v = numpy.matmul(numpy.matmul(numpy.diag(1.0/s), numpy.array(u).T), numpy.asarray(outer))
                     transform_v = transform_v[indices, :]
                     outer = transform_v
                 i_intra_svd_layer += 1
@@ -244,7 +237,7 @@ class AmusetTICA:
             else:
                 outer_a = outer
                 outer_b = [numpy.ones(data_length)]
-    
+
             for i in range(len(basis_list[il])):
                 mean  = basis_list[il][i][0]
                 sigma = basis_list[il][i][1]
@@ -272,9 +265,6 @@ class AmusetTICA:
         sequences : 3D list, [n_trajs][n_frames, n_features]
             a list of feature sequences
     
-        use_float32 : bool, default: False
-            Use numpy.float32 in the outer product
-    
         Returns
         -------
         outer_product : 2D array, [n_basis, n_all_frames] 
@@ -283,6 +273,9 @@ class AmusetTICA:
         traj_lens: list, [n_trajs]
             a list of lengths of all sequences 
     
+        use_float32 : bool, default: False
+            Use numpy.float32 in the outer product
+
         """
 
         this._basis_list = basis_list
@@ -299,7 +292,8 @@ class AmusetTICA:
         outer = this._build_outer_product(basis_list, data_matrix, True, use_float32)
 
       # build the Amuset
-        u, s, cvs = scipy.linalg.svd(outer, full_matrices=False, overwrite_a=True, check_finite=False)
+        #u, s, cvs = scipy.linalg.svd(outer, full_matrices=False, overwrite_a=True, check_finite=False)
+        u, s, cvs = cupy.linalg.svd(cupy.asarray(outer), full_matrices=False)
         indices = numpy.argsort(s)[::-1]
         cvs = cvs[indices, :]
 
@@ -349,15 +343,11 @@ class AmusetTICA:
         C00 = numpy.matmul(x_of_input, x_of_input.T)
         C11 = numpy.matmul(y_of_input, y_of_input.T)
         C01 = numpy.matmul(x_of_input, y_of_input.T)
-
-      # eigen decomposition or SVD of the Koopman matrix
-        if this.reversible:
-            K = numpy.matmul(numpy.linalg.inv(C00+C11), C01+C01.T)
-            evK, vrK = numpy.linalg.eig(K)
-        else:
-            K = numpy.matmul(numpy.linalg.inv(C00), C01)
-            vlK, evK, vrK = scipy.linalg.svd(K, full_matrices=True, overwrite_a=False)
-
+        K = numpy.matmul(numpy.linalg.inv(C00+C11), C01+C01.T)
+    
+      # eigen decomposition of the Koopman matrix
+        #evK, vrK = numpy.linalg.eig(K)
+        evK, vrK = cupy.linalg.eigh(K)
         idx = numpy.argsort(evK)[::-1]
         evK = evK[idx]
         vrK = vrK[:,idx]
@@ -374,7 +364,7 @@ class AmusetTICA:
                 ev_out.extend([this._ev_K[i]])
             else:
                 break
-        this._timescales = -lag_time/numpy.log(ev_out)
+        this._timescales = -lag_time/numpy.log(numpy.asarray(ev_out))
 
       # done 
         return this 
@@ -393,10 +383,10 @@ class AmusetTICA:
 
         lag_time : integer
             the lag time used to compute the time-lagged correlation matrix
-
+    
         use_float32 : bool, default: False
             Use numpy.float32 in the outer product
-    
+
         Returns
         -------
         this : object
@@ -473,11 +463,11 @@ class AmusetTICA:
 
         use_float32 : bool, default: False
             Use numpy.float32 in the outer product
-
+    
         _do_amuset_tica : bool, default: True
             True: CVs are orthogonalized with eigenvectors of K
             False: CVs are not orthogonalized, just top singular vectors
-    
+
         Returns
         -------
         cvs : 3D list, [n_trajs][n_frames, n_cvs]
@@ -489,7 +479,7 @@ class AmusetTICA:
 
         data_matrix, traj_lens = _convert_sequences(sequences)
         outer = this._build_outer_product(this._basis_list, data_matrix, False, use_float32)
-        transform_v = numpy.matmul(numpy.matmul(numpy.diag(1.0/this._tt_s[-1]), numpy.array(this._tt_u[-1]).T), outer)
+        transform_v = numpy.matmul(numpy.matmul(numpy.diag(1.0/this._tt_s[-1]), numpy.array(this._tt_u[-1]).T), numpy.asarray(outer))
         transform_v = transform_v[this._tt_indices[-1], :]
         if this.max_rank>0 and len(transform_v[0])>this.max_rank:
             transform_v = transform_v[:this.max_rank]
@@ -737,4 +727,5 @@ def _convert_to_sequences(data, traj_lens):
             seq.append(data_[op:op+traj_lens[it]])
         op += traj_lens[it]
     return seq
+
 
