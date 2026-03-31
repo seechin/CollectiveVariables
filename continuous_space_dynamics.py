@@ -1,5 +1,5 @@
 # Author: Siqin Cao <scao66@wisc.edu>
-# Copyright (c) 2024-2025, University of Wisconsin-Madison and the author
+# Copyright (c) 2024-2026, University of Wisconsin-Madison and the author
 # MIT License
 
 import numpy
@@ -549,7 +549,7 @@ def _msm_mle(input: list, steps: int=100000, errtol: float=1e-7, initial_guess: 
         list [raw_trajs, lag_time] : perform MLE with given trajectories and lag time 
             state_trajs: shape [n_trajs, n_frames]
 
-    stepz : int, default: 100000
+    steps : int, default: 100000
         The maximum steps of this-consistent iterations
 
     errtol : float, default: 1e-7
@@ -656,99 +656,4 @@ def _msm_mle(input: list, steps: int=100000, errtol: float=1e-7, initial_guess: 
         _TPM[i] /= numpy.sum(_TPM[i])
     
     return list(_sp), _TPM
-
-def pcca(cvs, divide: str="median", debug: bool=False):
-    """
-    Using PCCA to generate a macrostate model from collective variables
-
-    Parameters
-    ----------
-    cvs : 3D/2D list, [n_trajs][n_frames, n_cvs] or [n_cvs, n_all_frames]
-        collective variable trajectories
-
-    divide : str, default: "median"
-        mean:   divide states at div=mean(cvs)
-        0:      divide states at div=0, mostly equivalent to ``mean''
-        median: divide states at div=median(cvs)
-        center: divide states at div=median(mean(cvs<div), mean(cvs>div))
-
-    debug : bool, default: False
-        Display debug information
-
-    Returns
-    -------
-    assignment : 2D-list / 1D-array, [n_trajs][n_frames] or [n_all_frames]
-        The state assignments of all frames
-          assignment is 2D-list if cvs is 3D list
-          assignment is 1D-array if cvs is 2D list
-
-    """
-
-    if (len(cvs[0].shape)>1):
-        _cvs, _cvs_lens = _convert_sequences(cvs)
-    elif (len(cvs) > len(cvs[0])):
-        _cvs = cvs.T
-        _cvs_lens = [len(_cvs[0])]
-    else:
-        _cvs = cvs
-        _cvs_lens = [len(_cvs[0])]
-
-    assign = numpy.zeros(len(_cvs[0])).astype(int)
-    for im in range(len(_cvs)):
-        #print("PCCA %d -> %d"%(im,im+1))
-        i_chosen = 0
-        range_i_chosen = 0
-        for i in range(im):
-            #min_i = numpy.min(numpy.where(assign==i, _cvs[im], 1000))
-            #max_i = numpy.max(numpy.where(assign==i, _cvs[im],-1000))
-            #range_i = max_i - min_i
-            range_i = numpy.std(_cvs[im][numpy.where(assign==i)[0]])
-            #if debug:
-            #    print("previous state "+str(i)+" range: "+str(min_i)+" ~ "+str(max_i))
-            if (i_chosen<0 or range_i_chosen<range_i):
-                i_chosen = i
-                range_i_chosen = range_i
-        #print("ready to further split state "+str(i_chosen))
-        if divide.lower() == "median":
-          # new algorithm:
-            _sub_cvs = _cvs[im][numpy.where(assign==i_chosen)[0]]
-            pcca_cutoff = (numpy.min(_sub_cvs) + numpy.max(_sub_cvs)) / 2
-        elif divide.lower() == "mean":
-            _sub_cvs = _cvs[im][numpy.where(assign==i_chosen)[0]]
-            pcca_cutoff = numpy.mean(_sub_cvs)
-        elif divide.lower() == "center":
-            _sub_cvs = _cvs[im][numpy.where(assign==i_chosen)[0]]
-            pcca_cutoff = (numpy.min(_sub_cvs) + numpy.max(_sub_cvs)) / 2
-            for iloop in range(20):
-                _sub_cvs1 = _sub_cvs[numpy.where(_sub_cvs<pcca_cutoff)[0]]
-                _sub_cvs2 = _sub_cvs[numpy.where(_sub_cvs>pcca_cutoff)[0]]
-                pcca_cutoff = pcca_cutoff * 0.5 + (numpy.mean(_sub_cvs1) + numpy.mean(_sub_cvs2)) / 2 * 0.5
-        elif divide.lower() == "0":
-            pcca_cutoff = 0
-        else:
-            print("amuset_tica::PCCA: warning : unrecognizable divide %s, use ``0'' instead"%divide)
-            pcca_cutoff = 0
-        len_pos = len(numpy.where(_cvs[im] > pcca_cutoff)[0])
-        len_neg = len(numpy.where(_cvs[im] < pcca_cutoff)[0])
-        if len_pos < len_neg:
-            assign += numpy.where(_cvs[im] > pcca_cutoff, 1+im-i_chosen, 0) * numpy.where(assign==i_chosen, 1, 0)
-        else:
-            assign += numpy.where(_cvs[im] < pcca_cutoff, 1+im-i_chosen, 0) * numpy.where(assign==i_chosen, 1, 0)
-
-    if debug:
-        __sp = numpy.zeros(len(_cvs)+1)
-        for i in range(len(_cvs)+1):
-            __sp[i] = len(numpy.where(assign==i)[0])
-        __sp = __sp / numpy.sum(__sp)
-        print("populations: %s"%__sp.tolist())
-
-    if (len(cvs[0].shape)>1):
-        assign_ = []
-        op = 0
-        for it in range(len(_cvs_lens)):
-            assign_.append(assign[op:op+_cvs_lens[it]])
-            op += _cvs_lens[it]
-        assign = assign_
-
-    return assign
 
