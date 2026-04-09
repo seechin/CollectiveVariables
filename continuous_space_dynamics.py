@@ -4,7 +4,7 @@
 
 import numpy
 
-class KinetcVariables:
+class KineticVariables:
     """ Kinetic Variables Class 
 
     Parameters
